@@ -1,0 +1,113 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  SOLUTION_FILE: 'Project Files/Source/Thetis_VS2026.sln'
+  BUILD_CONFIGURATION: Release
+  BUILD_PLATFORM: x64
+  # The checked-in .vcxproj/.sln files pin PlatformToolset v145 and a v17.0
+  # VisualStudioVersion header (an unreleased VS toolset). windows-latest
+  # ships VS2022 (toolset v143) -- force it on every msbuild invocation below.
+  MSBUILD_TOOLSET_OVERRIDE: /p:PlatformToolset=v143 /p:VisualStudioVersion=17.0
+  # ChannelMaster.vcxproj reads $(HPSDR_PLATFORM) -- an *environment* variable,
+  # not an MSBuild property -- for several of its native-lib output/include
+  # paths (e.g. ../../lib/NR_Algorithms_$(HPSDR_PLATFORM)). It is never set
+  # anywhere in the repo, so it must come from the CI environment.
+  HPSDR_PLATFORM: x64
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet packages
+        run: nuget restore "${{ env.SOLUTION_FILE }}"
+        shell: pwsh
+
+      # --- Native dependencies that ChannelMaster.vcxproj links against but
+      # that are NOT projects in Thetis_VS2026.sln, so the solution build
+      # won't build them itself. They must exist before ChannelMaster builds.
+
+      - name: Configure opus_dnn (CMake)
+        # ASSUMPTION (unverified): OPUS_OSCE enables the FARGAN vocoder / LPCNet
+        # feature extractor that radae_c links against, per README's mention of
+        # "FARGAN vocoder (Opus DNN)". If the ChannelMaster build below fails on
+        # unresolved LPCNet/FARGAN symbols, try -DOPUS_DRED=ON or -DOPUS_DEEP_PLC=ON
+        # instead/also -- see Project Files/lib/opus_dnn/CMakeLists.txt around the
+        # OPUS_DEEP_PLC/OPUS_DRED/OPUS_OSCE options.
+        run: |
+          cmake -S "Project Files/lib/opus_dnn" -B "Project Files/lib/opus_dnn/build/${{ env.BUILD_PLATFORM }}" `
+            -A ${{ env.BUILD_PLATFORM }} `
+            -DOPUS_OSCE=ON -DOPUS_BUILD_TESTING=OFF -DOPUS_BUILD_PROGRAMS=OFF -DOPUS_BUILD_SHARED_LIBRARY=OFF
+        shell: pwsh
+
+      - name: Build opus_dnn
+        run: cmake --build "Project Files/lib/opus_dnn/build/${{ env.BUILD_PLATFORM }}" --config ${{ env.BUILD_CONFIGURATION }} --target opus
+        shell: pwsh
+
+      - name: Build rnnoise
+        run: >
+          msbuild "Project Files/lib/rnnoise/build/rnnoise.vcxproj"
+          /p:Configuration=${{ env.BUILD_CONFIGURATION }} /p:Platform=${{ env.BUILD_PLATFORM }}
+          ${{ env.MSBUILD_TOOLSET_OVERRIDE }} /m /v:minimal
+        shell: pwsh
+
+      - name: Build libebur128
+        run: >
+          msbuild "Project Files/lib/libebur128/build/libebur128.vcxproj"
+          /p:Configuration=${{ env.BUILD_CONFIGURATION }} /p:Platform=${{ env.BUILD_PLATFORM }}
+          ${{ env.MSBUILD_TOOLSET_OVERRIDE }} /m /v:minimal
+        shell: pwsh
+
+      - name: Build WebRTC_AGC
+        run: >
+          msbuild "Project Files/lib/WebRTC_AGC/build/WebRTC_AGC.vcxproj"
+          /p:Configuration=${{ env.BUILD_CONFIGURATION }} /p:Platform=${{ env.BUILD_PLATFORM }}
+          ${{ env.MSBUILD_TOOLSET_OVERRIDE }} /m /v:minimal
+        shell: pwsh
+
+      - name: Build radae_c
+        # Needs opus_dnn's opus.lib already built (OpusDir defaults to ../../opus_dnn).
+        run: >
+          msbuild "Project Files/lib/radae_c/msvc/radae_c.vcxproj"
+          /p:Configuration=${{ env.BUILD_CONFIGURATION }} /p:Platform=${{ env.BUILD_PLATFORM }}
+          ${{ env.MSBUILD_TOOLSET_OVERRIDE }} /m /v:minimal
+        shell: pwsh
+
+      # --- Main solution: portaudio, wdsp, cmASIO, ChannelMaster, Thetis,
+      # Midi2Cat, RawInput. These ARE solution projects with dependency
+      # ordering declared in the .sln, so one msbuild call handles them.
+      # (The Thetis-Installer WiX project has no Build.0 entry for
+      # Release|x64 in the .sln, so it's skipped automatically -- no WiX
+      # toolset needed here.)
+
+      - name: Build main solution
+        run: >
+          msbuild "${{ env.SOLUTION_FILE }}"
+          /p:Configuration=${{ env.BUILD_CONFIGURATION }} /p:Platform=${{ env.BUILD_PLATFORM }}
+          ${{ env.MSBUILD_TOOLSET_OVERRIDE }} /m /v:minimal
+        shell: pwsh
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: Thetis-RADE-${{ env.BUILD_PLATFORM }}-${{ env.BUILD_CONFIGURATION }}
+          path: |
+            Project Files/Source/bin/${{ env.BUILD_PLATFORM }}/${{ env.BUILD_CONFIGURATION }}/**
+            Project Files/bin/${{ env.BUILD_PLATFORM }}/${{ env.BUILD_CONFIGURATION }}/**
+          if-no-files-found: warn
