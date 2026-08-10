@@ -36,6 +36,15 @@ knows where to look.
   workflow builds each of them explicitly, in dependency order, before the
   main solution build.
 
+- **`opus_dnn`'s x86 SIMD source trees aren't vendored.** The first real CI
+  run (`run 31356272719`) failed CMake configure with `Cannot find source
+  file: silk/x86/main_sse.h`. `celt/x86/`, `dnn/x86/`, `silk/x86/`, and
+  `silk/fixed/x86/` are all empty/absent from this vendored opus checkout, so
+  CMake's default x86-intrinsics detection (on by default for x64) can't find
+  the files it wants to add. Fixed with `-DOPUS_DISABLE_INTRINSICS=ON` —
+  builds portable C instead of SSE/AVX-optimized code, which is a correctness
+  non-issue for a desktop app, just not the fastest possible opus.
+
 ## Best-effort / unverified — check here first if the build goes red
 
 - **`opus_dnn`'s CMake flag.** There's no committed `.vcxproj` for it, only

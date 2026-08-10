@@ -50,10 +50,17 @@ jobs:
         # unresolved LPCNet/FARGAN symbols, try -DOPUS_DRED=ON or -DOPUS_DEEP_PLC=ON
         # instead/also -- see Project Files/lib/opus_dnn/CMakeLists.txt around the
         # OPUS_DEEP_PLC/OPUS_DRED/OPUS_OSCE options.
+        #
+        # OPUS_DISABLE_INTRINSICS=ON is required, not optional: this vendored
+        # opus_dnn checkout doesn't include the x86 SIMD source trees at all
+        # (celt/x86, dnn/x86, silk/x86, silk/fixed/x86 are empty/absent), so
+        # CMake's default x86-intrinsics detection fails with "Cannot find
+        # source file: silk/x86/main_sse.h" the moment it's left enabled.
         run: |
           cmake -S "Project Files/lib/opus_dnn" -B "Project Files/lib/opus_dnn/build/${{ env.BUILD_PLATFORM }}" `
             -A ${{ env.BUILD_PLATFORM }} `
-            -DOPUS_OSCE=ON -DOPUS_BUILD_TESTING=OFF -DOPUS_BUILD_PROGRAMS=OFF -DOPUS_BUILD_SHARED_LIBRARY=OFF
+            -DOPUS_OSCE=ON -DOPUS_BUILD_TESTING=OFF -DOPUS_BUILD_PROGRAMS=OFF -DOPUS_BUILD_SHARED_LIBRARY=OFF `
+            -DOPUS_DISABLE_INTRINSICS=ON
         shell: pwsh
 
       - name: Build opus_dnn
