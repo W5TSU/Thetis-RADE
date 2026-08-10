@@ -43,6 +43,93 @@ jobs:
       # that are NOT projects in Thetis_VS2026.sln, so the solution build
       # won't build them itself. They must exist before ChannelMaster builds.
 
+      - name: Stub missing opus_dnn arch-specific headers/sources
+        # This vendored opus_dnn checkout is missing 65 files across
+        # celt/{x86,arm}, silk/{x86,arm,fixed/x86,fixed/arm,float/x86}, and
+        # dnn/{x86,arm} -- entire architecture-optimization subtrees were
+        # never committed. silk_headers.mk/celt_headers.mk/lpcnet_headers.mk
+        # list the x86/arm headers unconditionally (CMake's target_sources
+        # needs them to physically exist even though the code paths that
+        # would use them are disabled by OPUS_DISABLE_INTRINSICS below), and
+        # the corresponding .c sources are listed too even though they won't
+        # actually be added to the build. Create empty placeholders for all
+        # of them so CMake configure doesn't fail on a missing file.
+        run: |
+          $missing = @(
+            "celt/x86/celt_lpc_sse.h",
+            "celt/arm/armcpu.h",
+            "celt/arm/fixed_armv4.h",
+            "celt/arm/fixed_armv5e.h",
+            "celt/arm/fixed_arm64.h",
+            "celt/arm/kiss_fft_armv4.h",
+            "celt/arm/kiss_fft_armv5e.h",
+            "celt/arm/mathops_arm.h",
+            "celt/arm/pitch_arm.h",
+            "celt/arm/fft_arm.h",
+            "celt/arm/mdct_arm.h",
+            "celt/x86/pitch_sse.h",
+            "celt/x86/vq_sse.h",
+            "celt/x86/x86_arch_macros.h",
+            "celt/x86/x86cpu.h",
+            "celt/x86/x86cpu.c",
+            "celt/x86/x86_celt_map.c",
+            "celt/x86/pitch_sse.c",
+            "celt/x86/pitch_sse2.c",
+            "celt/x86/vq_sse2.c",
+            "celt/x86/celt_lpc_sse4_1.c",
+            "celt/x86/pitch_sse4_1.c",
+            "celt/x86/pitch_avx.c",
+            "celt/arm/armcpu.c",
+            "celt/arm/arm_celt_map.c",
+            "celt/arm/celt_neon_intr.c",
+            "celt/arm/pitch_neon_intr.c",
+            "celt/arm/celt_fft_ne10.c",
+            "celt/arm/celt_mdct_ne10.c",
+            "dnn/x86/dnn_x86.h",
+            "dnn/arm/dnn_arm.h",
+            "dnn/x86/x86_dnn_map.c",
+            "dnn/x86/nnet_avx2.c",
+            "dnn/x86/nnet_sse4_1.c",
+            "dnn/x86/nnet_sse2.c",
+            "dnn/arm/arm_dnn_map.c",
+            "dnn/arm/nnet_dotprod.c",
+            "dnn/arm/nnet_neon.c",
+            "silk/x86/main_sse.h",
+            "silk/x86/SigProc_FIX_sse.h",
+            "silk/arm/biquad_alt_arm.h",
+            "silk/arm/LPC_inv_pred_gain_arm.h",
+            "silk/arm/macros_armv4.h",
+            "silk/arm/macros_armv5e.h",
+            "silk/arm/macros_arm64.h",
+            "silk/arm/SigProc_FIX_armv4.h",
+            "silk/arm/SigProc_FIX_armv5e.h",
+            "silk/arm/NSQ_del_dec_arm.h",
+            "silk/arm/NSQ_neon.h",
+            "silk/fixed/arm/warped_autocorrelation_FIX_arm.h",
+            "silk/x86/x86_silk_map.c",
+            "silk/x86/NSQ_sse4_1.c",
+            "silk/x86/NSQ_del_dec_sse4_1.c",
+            "silk/x86/VAD_sse4_1.c",
+            "silk/x86/VQ_WMat_EC_sse4_1.c",
+            "silk/x86/NSQ_del_dec_avx2.c",
+            "silk/arm/arm_silk_map.c",
+            "silk/arm/biquad_alt_neon_intr.c",
+            "silk/arm/LPC_inv_pred_gain_neon_intr.c",
+            "silk/arm/NSQ_del_dec_neon_intr.c",
+            "silk/arm/NSQ_neon.c",
+            "silk/fixed/x86/vector_ops_FIX_sse4_1.c",
+            "silk/fixed/x86/burg_modified_FIX_sse4_1.c",
+            "silk/fixed/arm/warped_autocorrelation_FIX_neon_intr.c",
+            "silk/float/x86/inner_product_FLP_avx2.c"
+          )
+          foreach ($rel in $missing) {
+            $path = Join-Path "Project Files/lib/opus_dnn" $rel
+            $dir = Split-Path $path -Parent
+            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+            if (-not (Test-Path $path)) { New-Item -ItemType File -Path $path | Out-Null }
+          }
+        shell: pwsh
+
       - name: Configure opus_dnn (CMake)
         # ASSUMPTION (unverified): OPUS_OSCE enables the FARGAN vocoder / LPCNet
         # feature extractor that radae_c links against, per README's mention of

@@ -36,14 +36,23 @@ knows where to look.
   workflow builds each of them explicitly, in dependency order, before the
   main solution build.
 
-- **`opus_dnn`'s x86 SIMD source trees aren't vendored.** The first real CI
-  run (`run 31356272719`) failed CMake configure with `Cannot find source
-  file: silk/x86/main_sse.h`. `celt/x86/`, `dnn/x86/`, `silk/x86/`, and
-  `silk/fixed/x86/` are all empty/absent from this vendored opus checkout, so
-  CMake's default x86-intrinsics detection (on by default for x64) can't find
-  the files it wants to add. Fixed with `-DOPUS_DISABLE_INTRINSICS=ON` —
-  builds portable C instead of SSE/AVX-optimized code, which is a correctness
-  non-issue for a desktop app, just not the fastest possible opus.
+- **`opus_dnn`'s x86/arm SIMD source trees aren't vendored — 65 files.** The
+  first CI run (`31356272719`) failed CMake configure with `Cannot find source
+  file: silk/x86/main_sse.h`. Adding `-DOPUS_DISABLE_INTRINSICS=ON` alone
+  wasn't enough (`31357037818` failed on the exact same file) because
+  `silk_headers.mk`/`celt_headers.mk`/`lpcnet_headers.mk` list their x86/arm
+  headers *unconditionally* — `add_sources_group(opus silk ${silk_headers}
+  ${silk_sources})` in `CMakeLists.txt:391` runs before any intrinsics check,
+  and CMake's `target_sources` requires the file to physically exist even
+  when nothing will ever use it. Cross-checking every `.mk` list against the
+  actual tree found 65 missing files total, spanning `celt/{x86,arm}`,
+  `silk/{x86,arm,fixed/x86,fixed/arm,float/x86}`, and `dnn/{x86,arm}` — entire
+  architecture-optimization subtrees were never committed to this vendored
+  opus checkout. Fixed with a workflow step that creates all 65 as empty
+  placeholder files before CMake runs. They're genuinely never compiled in
+  (the `.c` sources among them are gated behind `OPUS_DISABLE_INTRINSICS`,
+  which is on) — this is a correctness non-issue, just means portable C
+  instead of SSE/AVX/NEON-optimized code, fine for a desktop app.
 
 ## Best-effort / unverified — check here first if the build goes red
 
